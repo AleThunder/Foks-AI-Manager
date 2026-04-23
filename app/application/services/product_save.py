@@ -138,6 +138,8 @@ class ApplyProductPatchService:
 class SaveProductPatchService:
     """Approve, execute, and verify saving one persisted draft patch through FOKS."""
 
+    RETRYABLE_PATCH_STATUSES = {"draft", "approved", "verification_failed"}
+
     def __init__(
         self,
         *,
@@ -173,8 +175,8 @@ class SaveProductPatchService:
         persisted_patch = self._patch_repository.get_patch_by_id(patch_id)
         if persisted_patch is None:
             raise LookupError(f"Persisted patch '{patch_id}' was not found.")
-        if persisted_patch.status not in {"draft", "approved"}:
-            raise ValueError("Only draft or approved patches can be saved.")
+        if persisted_patch.status not in self.RETRYABLE_PATCH_STATUSES:
+            raise ValueError("Only draft, approved, or verification_failed patches can be saved.")
         if persisted_patch.validation_errors:
             raise ValueError("Patch contains validation errors and cannot be saved.")
         if persisted_patch.base_snapshot_id is None:
@@ -183,14 +185,6 @@ class SaveProductPatchService:
         aggregate = self._aggregate_service.get_by_id(product_id=persisted_patch.product_record_id)
         if aggregate is None or aggregate.latest_snapshot is None:
             raise LookupError(f"Persisted aggregate for patch '{patch_id}' was not found.")
-        if aggregate.latest_snapshot.id != persisted_patch.base_snapshot_id:
-            raise ValueError(
-                "Patch was generated from a stale snapshot. Refresh the product and generate a new preview."
-            )
-
-        base_snapshot = self._snapshot_repository.get_snapshot_by_id(persisted_patch.base_snapshot_id)
-        if base_snapshot is None:
-            raise LookupError(f"Base snapshot '{persisted_patch.base_snapshot_id}' was not found.")
 
         task_record_id = self._task_repository.start_task(
             task_id=get_task_id(),
@@ -203,25 +197,52 @@ class SaveProductPatchService:
             },
         )
 
+        resolved_approved_at = persisted_patch.approved_at
+        resolved_approved_by = persisted_patch.approved_by
+        if persisted_patch.status == "draft":
+            resolved_approved_at = datetime.now(timezone.utc)
+            resolved_approved_by = approved_by
+        elif resolved_approved_at is None:
+            resolved_approved_at = datetime.now(timezone.utc)
+
+        response_payload: Any | None = None
+        save_post_completed = False
+
         try:
             session = self._session_factory(
                 base_url=base_url,
                 username=username,
                 password=password,
             )
-            patched_snapshot = self._apply_patch_service.apply(
-                snapshot=base_snapshot,
-                patch=persisted_patch.patch,
-            )
-            payload = self._apply_patch_service.build_save_payload(snapshot=patched_snapshot)
-            headers = session.build_json_headers(csrf_token=patched_snapshot.csrf_save_token)
-            approved_at = datetime.now(timezone.utc)
+            if persisted_patch.status == "draft" or not persisted_patch.payload:
+                if aggregate.latest_snapshot.id != persisted_patch.base_snapshot_id:
+                    raise ValueError(
+                        "Patch was generated from a stale snapshot. Refresh the product and generate a new preview."
+                    )
+
+                base_snapshot = self._snapshot_repository.get_snapshot_by_id(persisted_patch.base_snapshot_id)
+                if base_snapshot is None:
+                    raise LookupError(f"Base snapshot '{persisted_patch.base_snapshot_id}' was not found.")
+
+                patched_snapshot = self._apply_patch_service.apply(
+                    snapshot=base_snapshot,
+                    patch=persisted_patch.patch,
+                )
+                payload = self._apply_patch_service.build_save_payload(snapshot=patched_snapshot)
+                csrf_token = patched_snapshot.csrf_save_token
+                headers = session.build_json_headers(csrf_token=csrf_token)
+            else:
+                payload = dict(persisted_patch.payload)
+                headers = dict(persisted_patch.headers)
+                csrf_token = str(headers.get("X-CSRF-TOKEN", "") or "")
+                if not csrf_token:
+                    raise ValueError("Approved patch is missing CSRF metadata and cannot be retried safely.")
 
             self._patch_repository.update_patch(
                 patch_id,
                 status="approved",
-                approved_at=approved_at,
-                approved_by=approved_by,
+                approved_at=resolved_approved_at,
+                approved_by=resolved_approved_by,
                 save_url="/c/products/save",
                 headers=headers,
                 payload=payload,
@@ -230,7 +251,7 @@ class SaveProductPatchService:
                     "pre_save_snapshot_id": persisted_patch.base_snapshot_id,
                     "audit": self._build_audit(
                         persisted_patch=persisted_patch,
-                        approved_by=approved_by,
+                        approved_by=resolved_approved_by,
                         post_save_snapshot_id=None,
                     ),
                     "verification": {"status": "pending"},
@@ -250,8 +271,9 @@ class SaveProductPatchService:
             response_payload = session.post_json(
                 "/c/products/save",
                 json_body=payload,
-                csrf_token=patched_snapshot.csrf_save_token,
+                csrf_token=csrf_token,
             )
+            save_post_completed = True
             self._save_logger.info(
                 "foks_save_request_completed",
                 extra={
@@ -275,7 +297,7 @@ class SaveProductPatchService:
                 refreshed_aggregate=refreshed_aggregate,
                 persisted_patch=persisted_patch,
             )
-            final_status = "saved" if verification["status"] == "ok" else "failed"
+            final_status = "saved" if verification["status"] == "ok" else "verification_failed"
             updated_patch = self._patch_repository.update_patch(
                 patch_id,
                 status=final_status,
@@ -286,7 +308,7 @@ class SaveProductPatchService:
                     ),
                     "audit": self._build_audit(
                         persisted_patch=persisted_patch,
-                        approved_by=approved_by,
+                        approved_by=resolved_approved_by,
                         post_save_snapshot_id=(
                             refreshed_aggregate.latest_snapshot.id if refreshed_aggregate.latest_snapshot else None
                         ),
@@ -309,18 +331,27 @@ class SaveProductPatchService:
             assert updated_patch is not None
             return updated_patch
         except Exception as exc:
+            failure_status = "verification_failed" if save_post_completed else "failed"
+            failure_save_result = {
+                "pre_save_snapshot_id": persisted_patch.base_snapshot_id,
+                "audit": self._build_audit(
+                    persisted_patch=persisted_patch,
+                    approved_by=resolved_approved_by,
+                    post_save_snapshot_id=None,
+                ),
+                "error": str(exc),
+            }
+            if response_payload is not None:
+                failure_save_result["response"] = response_payload
+            if save_post_completed:
+                failure_save_result["verification"] = {
+                    "status": "error",
+                    "error": str(exc),
+                }
             self._patch_repository.update_patch(
                 patch_id,
-                status="failed",
-                save_result={
-                    "pre_save_snapshot_id": persisted_patch.base_snapshot_id,
-                    "audit": self._build_audit(
-                        persisted_patch=persisted_patch,
-                        approved_by=approved_by,
-                        post_save_snapshot_id=None,
-                    ),
-                    "error": str(exc),
-                },
+                status=failure_status,
+                save_result=failure_save_result,
             )
             self._task_repository.fail_task(
                 task_record_id,

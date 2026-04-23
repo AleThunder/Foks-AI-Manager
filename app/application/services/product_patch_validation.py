@@ -95,9 +95,16 @@ class ProductPatchValidationService:
                 feature_values=normalized_feature_values,
             )
 
+        requested_product_id = str(raw_patch.get("product_id") or snapshot.product_id)
+        requested_offer_id = str(raw_patch.get("offer_id") or snapshot.offer_id)
+        if requested_product_id != snapshot.product_id:
+            errors.append("Draft product_id must match the persisted snapshot product_id.")
+        if requested_offer_id != snapshot.offer_id:
+            errors.append("Draft offer_id must match the persisted snapshot offer_id.")
+
         patch = ProductPatch(
-            product_id=str(raw_patch.get("product_id") or snapshot.product_id),
-            offer_id=str(raw_patch.get("offer_id") or snapshot.offer_id),
+            product_id=snapshot.product_id,
+            offer_id=snapshot.offer_id,
             basic_fields={},
             flags={},
             marketplace_patches=normalized_marketplace_patches,

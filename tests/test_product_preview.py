@@ -179,6 +179,35 @@ class ProductPreviewTests(unittest.TestCase):
         self.assertTrue(any("priceExt" in error for error in persisted_patch.validation_errors))
         self.assertTrue(any("Unknown" in error for error in persisted_patch.validation_errors))
 
+    def test_preview_service_rejects_identifier_mismatch_against_snapshot(self) -> None:
+        """Manual drafts must not override the persisted product and offer identifiers."""
+        service = PreviewProductPatchService(
+            aggregate_service=self._aggregate_service,
+            patch_repository=self._patch_repository,
+            task_repository=self._task_repository,
+            patch_generator=None,
+        )
+
+        persisted_patch = service.preview(
+            article="ART-777",
+            raw_draft={
+                "product_id": "prod-other",
+                "offer_id": "offer-other",
+                "marketplace_patches": [
+                    {
+                        "market_id": "prom",
+                        "fields": {"nameExt": "Updated title"},
+                    }
+                ],
+            },
+        )
+
+        self.assertEqual(persisted_patch.status, "failed")
+        self.assertEqual(persisted_patch.patch.product_id, "prod-1")
+        self.assertEqual(persisted_patch.patch.offer_id, "offer-1")
+        self.assertTrue(any("product_id" in error for error in persisted_patch.validation_errors))
+        self.assertTrue(any("offer_id" in error for error in persisted_patch.validation_errors))
+
 
 if __name__ == "__main__":
     unittest.main()

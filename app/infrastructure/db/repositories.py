@@ -339,8 +339,8 @@ class SnapshotRepository:
 class ProductAggregateRepository:
     """Load the API-facing aggregate from the latest persisted product state."""
 
-    DRAFT_WORKFLOW_STATUSES = ("draft", "approved", "saved", "failed")
-    SAVE_WORKFLOW_STATUSES = ("saved", "failed")
+    DRAFT_WORKFLOW_STATUSES = ("draft", "approved", "saved", "failed", "verification_failed")
+    SAVE_WORKFLOW_STATUSES = ("saved", "failed", "verification_failed")
 
     def __init__(
         self,
