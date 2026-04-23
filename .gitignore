@@ -1,5 +1,6 @@
 .idea/
 .venv/
-.env
-.codex
+.codex/*
 logs/
+*/__pycache__
+.env
