@@ -1,5 +1,6 @@
 .idea/
 .venv/
+.codex/
 .codex/*
 logs/
 */__pycache__
