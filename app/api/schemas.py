@@ -174,6 +174,7 @@ class ProductPatchStatusResponse(BaseModel):
     status: str
     base_snapshot_id: int | None = None
     task_id: int | None = None
+    created_by: str = ""
     save_url: str = ""
     validation_warnings: list[str] = Field(default_factory=list)
     validation_errors: list[str] = Field(default_factory=list)
@@ -192,6 +193,7 @@ class ProductPatchStatusResponse(BaseModel):
             status=status.status,
             base_snapshot_id=status.base_snapshot_id,
             task_id=status.task_id,
+            created_by=status.created_by,
             save_url=status.save_url,
             validation_warnings=list(status.validation_warnings),
             validation_errors=list(status.validation_errors),
@@ -274,6 +276,8 @@ class PreviewPatchRequest(BaseModel):
     """Describe the input payload for previewing an AI-generated or manual normalized draft."""
     article: str | None = None
     product_id: int | None = None
+    mids: list[str] | None = None
+    created_by: str = ""
     instructions: str | None = None
     draft: ProductPatchDraftInput | None = None
 
@@ -283,6 +287,16 @@ class PreviewPatchRequest(BaseModel):
         if bool(self.article) == bool(self.product_id):
             raise ValueError("Provide exactly one of article or product_id.")
         return self
+
+
+class SavePatchRequest(BaseModel):
+    """Describe the input payload for approving and saving one persisted draft patch."""
+    patch_id: int = Field(gt=0)
+    approved_by: str = ""
+    mids: list[str] | None = None
+    base_url: str | None = None
+    username: str | None = None
+    password: str | None = None
 
 
 class MarketplacePatchResponse(BaseModel):
@@ -342,6 +356,7 @@ class PersistedProductPatchResponse(BaseModel):
     status: str
     base_snapshot_id: int | None = None
     task_id: int | None = None
+    created_by: str = ""
     save_url: str = ""
     validation_warnings: list[str] = Field(default_factory=list)
     validation_errors: list[str] = Field(default_factory=list)
@@ -364,6 +379,7 @@ class PersistedProductPatchResponse(BaseModel):
             status=persisted_patch.status,
             base_snapshot_id=persisted_patch.base_snapshot_id,
             task_id=persisted_patch.task_id,
+            created_by=persisted_patch.created_by,
             save_url=persisted_patch.save_url,
             validation_warnings=list(persisted_patch.validation_warnings),
             validation_errors=list(persisted_patch.validation_errors),

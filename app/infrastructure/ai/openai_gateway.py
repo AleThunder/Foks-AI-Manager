@@ -23,11 +23,10 @@ class OpenAIProductPatchGateway:
     ) -> None:
         """Store OpenAI SDK settings and a reusable client instance."""
         self._model = model
-        self._base_url = base_url.rstrip("/")
         self._timeout_seconds = timeout_seconds
         self._client = client or OpenAI(
             api_key=api_key,
-            base_url=self._base_url,
+            base_url=base_url.rstrip("/"),
             timeout=timeout_seconds,
         )
         self._logger = get_logger("app.integration.openai")

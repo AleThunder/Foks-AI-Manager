@@ -8,6 +8,7 @@ from app.api.dependencies import (
     get_product_aggregate_service,
     get_product_refresh_service,
     get_runtime_settings,
+    get_save_patch_service,
 )
 from app.api.schemas import (
     BuildPayloadRequest,
@@ -18,10 +19,12 @@ from app.api.schemas import (
     ProductAggregateEnvelope,
     ProductAggregateResponse,
     RefreshProductRequest,
+    SavePatchRequest,
 )
 from app.application.services.product_aggregate import GetProductAggregateService, RefreshProductAggregateService
 from app.application.services.product_payload import BuildSavePayloadService
 from app.application.services.product_preview import PreviewProductPatchService
+from app.application.services.product_save import SaveProductPatchService
 from app.infrastructure.settings import Settings
 
 router = APIRouter(prefix="/products", tags=["products"])
@@ -110,6 +113,8 @@ def preview_patch(
         persisted_patch = service.preview(
             article=request.article,
             product_id=request.product_id,
+            mids=request.mids,
+            created_by=request.created_by,
             instructions=request.instructions,
             raw_draft=request.draft.model_dump(mode="json") if request.draft else None,
         )
@@ -123,6 +128,40 @@ def preview_patch(
     return PersistedProductPatchEnvelope(
         data=PersistedProductPatchResponse.from_domain(persisted_patch)
     )
+
+
+@router.post("/save", response_model=PersistedProductPatchEnvelope)
+def save_patch(
+    request: SavePatchRequest,
+    service: SaveProductPatchService = Depends(get_save_patch_service),
+    settings: Settings = Depends(get_runtime_settings),
+) -> PersistedProductPatchEnvelope:
+    """Approve one persisted draft patch, save it to FOKS, and return the final lifecycle state."""
+    base_url = request.base_url or settings.foks_base_url
+    username = request.username or settings.foks_username
+    password = request.password or settings.foks_password
+
+    if not username or not password:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Set FOKS_USERNAME and FOKS_PASSWORD in .env or pass them in the request body.",
+        )
+
+    try:
+        persisted_patch = service.save(
+            patch_id=request.patch_id,
+            base_url=base_url,
+            username=username,
+            password=password,
+            approved_by=request.approved_by,
+            mids=request.mids,
+        )
+    except LookupError as exc:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+
+    return PersistedProductPatchEnvelope(data=PersistedProductPatchResponse.from_domain(persisted_patch))
 
 
 @router.get("/{product_id}", response_model=ProductAggregateEnvelope)

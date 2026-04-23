@@ -33,12 +33,16 @@ MODAL_HTML = """
 
 
 class FakeSession:
+    """Serve deterministic search, modal, and feature payloads for read-flow tests."""
+
     def __init__(self, base_url: str, username: str, password: str) -> None:
+        """Store constructor inputs to mimic the real session signature."""
         self.base_url = base_url
         self.username = username
         self.password = password
 
     def get_html(self, path: str, params: dict[str, str] | None = None) -> str:
+        """Return fixture HTML for search and product modal requests."""
         if path == "/c/products":
             return SEARCH_HTML
         if path == "/c/products/productModal":
@@ -46,6 +50,7 @@ class FakeSession:
         raise AssertionError(path)
 
     def get_json(self, path: str, params: dict[str, str] | None = None):
+        """Return fixture JSON for product and category feature endpoints."""
         if path.startswith("/api/v1/product/features/"):
             return [
                 {"name": "Color", "values": ["Black"]},
@@ -60,6 +65,8 @@ class FakeSession:
 
 
 class ProductReadTests(unittest.TestCase):
+    """Cover the end-to-end product read orchestration against fake FOKS responses."""
+
     def setUp(self) -> None:
         """Point repository-backed services at an isolated SQLite database for the test run."""
         self._temp_dir = tempfile.TemporaryDirectory()
@@ -78,6 +85,7 @@ class ProductReadTests(unittest.TestCase):
         self._temp_dir.cleanup()
 
     def test_get_product_by_article_returns_single_snapshot(self) -> None:
+        """Reading by article should persist one normalized snapshot with marketplace features."""
         service = GetProductByArticleService(
             snapshot_repository=SnapshotRepository(),
             task_repository=TaskRepository(),

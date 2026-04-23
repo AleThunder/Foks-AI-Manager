@@ -18,7 +18,10 @@ from app.infrastructure.settings import get_settings
 
 
 class DatabaseRepositoryTests(unittest.TestCase):
+    """Cover repository round-trips for snapshots, patches, and aggregate reads."""
+
     def setUp(self) -> None:
+        """Point repository-backed services at an isolated SQLite database for the test run."""
         self._temp_dir = tempfile.TemporaryDirectory()
         database_path = Path(self._temp_dir.name) / "test.db"
         configure_database(
@@ -28,6 +31,7 @@ class DatabaseRepositoryTests(unittest.TestCase):
         upgrade_database(url=f"sqlite:///{database_path}")
 
     def tearDown(self) -> None:
+        """Restore the default application database configuration after each test."""
         settings = get_settings()
         configure_database(
             url=settings.sqlalchemy_database_url,
@@ -37,6 +41,7 @@ class DatabaseRepositoryTests(unittest.TestCase):
         self._temp_dir.cleanup()
 
     def test_snapshot_repository_persists_and_reloads_domain_snapshot(self) -> None:
+        """Persisting one snapshot should keep normalized marketplace state intact on reload."""
         repository = SnapshotRepository()
         snapshot = ProductSnapshot(
             article="ART-777",
@@ -84,6 +89,7 @@ class DatabaseRepositoryTests(unittest.TestCase):
         self.assertEqual(ProductRepository().get_record_id_by_pid(persisted_snapshot.pid), product_record_id)
 
     def test_patch_repository_persists_patch_with_marketplace_payload(self) -> None:
+        """Persisting one patch should preserve lifecycle status and marketplace payloads."""
         snapshot_repository = SnapshotRepository()
         patch_repository = PatchRepository()
         task_repository = TaskRepository()
@@ -116,6 +122,7 @@ class DatabaseRepositoryTests(unittest.TestCase):
             ),
             article="ART-777",
             pid="bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+            created_by="draft.user",
             save_url="/c/products/save",
             headers={"X-CSRF-TOKEN": "csrf-123"},
             payload={"id": "prod-1"},
@@ -128,8 +135,10 @@ class DatabaseRepositoryTests(unittest.TestCase):
         assert persisted_patch is not None
         self.assertEqual(persisted_patch.patch.offer_id, "offer-1")
         self.assertEqual(persisted_patch.status, "built")
+        self.assertEqual(persisted_patch.created_by, "draft.user")
 
     def test_product_aggregate_repository_returns_latest_persisted_state(self) -> None:
+        """Aggregate reads should compose identity, snapshot state, and workflow status together."""
         product_repository = ProductRepository()
         snapshot_repository = SnapshotRepository(product_repository=product_repository)
         patch_repository = PatchRepository()
@@ -183,6 +192,7 @@ class DatabaseRepositoryTests(unittest.TestCase):
             pid=persisted_snapshot.pid,
             base_snapshot_id=1,
             status="draft",
+            created_by="draft.user",
             save_url="/c/products/save",
             headers={"X-CSRF-TOKEN": "csrf-123"},
             payload={"id": "prod-1"},
@@ -199,6 +209,7 @@ class DatabaseRepositoryTests(unittest.TestCase):
         self.assertEqual(aggregate.marketplaces["prom"].current_features["Color"].values, ["Black"])
         self.assertIsNotNone(aggregate.workflow.draft)
         self.assertEqual(aggregate.workflow.draft.status if aggregate.workflow.draft else None, "draft")
+        self.assertEqual(aggregate.workflow.draft.created_by if aggregate.workflow.draft else None, "draft.user")
         self.assertIsNone(aggregate.workflow.save)
 
 

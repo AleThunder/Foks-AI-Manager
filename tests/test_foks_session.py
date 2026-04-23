@@ -13,6 +13,7 @@ def make_response(
     headers: dict[str, str] | None = None,
     url: str = "https://my.foks.biz/c/products",
 ) -> Mock:
+    """Build a lightweight fake HTTP response object for session tests."""
     response = Mock()
     response.status_code = status_code
     response.text = text
@@ -24,7 +25,10 @@ def make_response(
 
 
 class FoksSessionTests(unittest.TestCase):
+    """Exercise login, retry, and header behavior in the FOKS HTTP wrapper."""
+
     def test_get_html_logs_in_before_first_protected_request(self) -> None:
+        """The first protected HTML request should trigger the login handshake automatically."""
         mock_http = Mock()
         mock_http.request.side_effect = [
             make_response(
@@ -48,6 +52,7 @@ class FoksSessionTests(unittest.TestCase):
         self.assertEqual(mock_http.request.call_count, 3)
 
     def test_get_json_reauths_and_retries_when_session_expires(self) -> None:
+        """Expired JSON sessions should clear cookies, relogin, and retry once."""
         mock_http = Mock()
         login_page = "<html><form action='/login'><input name=\"_csrf\" value=\"token\"></form></html>"
         final_json_response = make_response(
@@ -89,6 +94,7 @@ class FoksSessionTests(unittest.TestCase):
         mock_http.cookies.clear.assert_called_once()
 
     def test_build_json_headers_includes_csrf_and_referer(self) -> None:
+        """JSON headers should always include CSRF, referer, and origin values."""
         with patch("app.infrastructure.foks.session.requests.Session", return_value=Mock()):
             session = FoksSession("https://my.foks.biz", "user", "pass")
 

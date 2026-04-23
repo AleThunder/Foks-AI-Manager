@@ -6,7 +6,10 @@ from app.infrastructure.foks.modal_parser import ModalParser
 
 
 class ModalParserTests(unittest.TestCase):
+    """Validate modal parsing into normalized top-level and marketplace fields."""
+
     def test_modal_parser_splits_basic_fields_marketplace_fields_and_flags(self) -> None:
+        """Modal parsing should separate product fields, flags, metadata, and marketplace values."""
         html = """
         <form id="productForm">
           <input name="id" value="prod-1" />

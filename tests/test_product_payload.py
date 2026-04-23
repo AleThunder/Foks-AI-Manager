@@ -5,7 +5,7 @@ import unittest
 from pathlib import Path
 
 from app.application.services.product_payload import BuildSavePayloadService
-from app.infrastructure.db import PatchRepository, ProductRepository, SnapshotRepository, TaskRepository, configure_database, upgrade_database
+from app.infrastructure.db import SnapshotRepository, TaskRepository, configure_database, upgrade_database
 from app.infrastructure.settings import get_settings
 
 
@@ -35,12 +35,16 @@ MODAL_HTML = """
 
 
 class FakeSession:
+    """Serve deterministic HTML and JSON payloads for save-payload tests."""
+
     def __init__(self, base_url: str, username: str, password: str) -> None:
+        """Store constructor inputs to mimic the real session signature."""
         self.base_url = base_url
         self.username = username
         self.password = password
 
     def get_html(self, path: str, params: dict[str, str] | None = None) -> str:
+        """Return fixture HTML for search and product modal requests."""
         if path == "/c/products":
             return SEARCH_HTML
         if path == "/c/products/productModal":
@@ -48,6 +52,7 @@ class FakeSession:
         raise AssertionError(path)
 
     def get_json(self, path: str, params: dict[str, str] | None = None):
+        """Return fixture feature payloads keyed by integration endpoint."""
         if path.startswith("/api/v1/product/features/"):
             return {"Color": ["Black"]}
         if path == "/api/v1/market-cat/features":
@@ -55,6 +60,7 @@ class FakeSession:
         raise AssertionError(path)
 
     def build_json_headers(self, csrf_token: str, referer_path: str = "/c/products") -> dict[str, str]:
+        """Return headers in the same shape as the real FOKS session helper."""
         return {
             "X-CSRF-TOKEN": csrf_token,
             "Referer": f"{self.base_url}{referer_path}",
@@ -62,6 +68,8 @@ class FakeSession:
 
 
 class ProductPayloadTests(unittest.TestCase):
+    """Verify save-payload building from normalized modal snapshots."""
+
     def setUp(self) -> None:
         """Point repository-backed services at an isolated SQLite database for the test run."""
         self._temp_dir = tempfile.TemporaryDirectory()
@@ -80,11 +88,9 @@ class ProductPayloadTests(unittest.TestCase):
         self._temp_dir.cleanup()
 
     def test_build_save_payload_uses_normalized_modal_snapshot(self) -> None:
-        product_repository = ProductRepository()
+        """Payload building should preserve normalized fields, headers, and feature arrays."""
         service = BuildSavePayloadService(
-            product_repository=product_repository,
-            snapshot_repository=SnapshotRepository(product_repository=product_repository),
-            patch_repository=PatchRepository(),
+            snapshot_repository=SnapshotRepository(),
             task_repository=TaskRepository(),
             session_factory=FakeSession,
         )

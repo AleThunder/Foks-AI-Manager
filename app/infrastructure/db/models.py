@@ -142,6 +142,7 @@ class ProductPatchRecord(TimestampMixin, Base):
     base_snapshot_id: Mapped[int | None] = mapped_column(Integer, nullable=True, index=True)
     offer_id: Mapped[str] = mapped_column(String(64), nullable=False, default="")
     status: Mapped[str] = mapped_column(String(32), nullable=False, default="built")
+    created_by: Mapped[str | None] = mapped_column(String(255), nullable=True)
     save_url: Mapped[str] = mapped_column(String(255), nullable=False, default="")
     headers: Mapped[dict[str, Any]] = mapped_column(JSON, nullable=False, default=dict)
     payload: Mapped[dict[str, Any]] = mapped_column(JSON, nullable=False, default=dict)

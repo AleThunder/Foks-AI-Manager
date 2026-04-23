@@ -7,13 +7,6 @@ from datetime import datetime
 from app.domain.models import PersistedProductPatch, ProductAggregate, ProductPatch, ProductSnapshot
 
 
-class ProductRepositoryPort(Protocol):
-    """Describe product identity operations required by the application layer."""
-
-    def get_record_id_by_pid(self, pid: str) -> int | None:
-        """Resolve the stored database identifier for one product pid."""
-
-
 class SnapshotRepositoryPort(Protocol):
     """Describe snapshot persistence operations required by the read flow."""
 
@@ -25,6 +18,9 @@ class SnapshotRepositoryPort(Protocol):
         task_record_id: int | None = None,
     ) -> tuple[int, ProductSnapshot]:
         """Persist one normalized product snapshot and return its stored representation."""
+
+    def get_snapshot_by_id(self, snapshot_record_id: int) -> ProductSnapshot | None:
+        """Load one persisted snapshot by its database identifier."""
 
 
 class PatchRepositoryPort(Protocol):
@@ -39,6 +35,7 @@ class PatchRepositoryPort(Protocol):
         pid: str,
         base_snapshot_id: int | None = None,
         status: str = "built",
+        created_by: str | None = None,
         save_url: str,
         headers: dict[str, Any],
         payload: dict[str, Any],
@@ -54,6 +51,25 @@ class PatchRepositoryPort(Protocol):
 
     def get_patch_by_id(self, patch_id: int) -> PersistedProductPatch | None:
         """Load one persisted patch together with its lifecycle metadata."""
+
+    def update_patch(
+        self,
+        patch_id: int,
+        *,
+        status: str | None = None,
+        created_by: str | None = None,
+        save_url: str | None = None,
+        headers: dict[str, Any] | None = None,
+        payload: dict[str, Any] | None = None,
+        validation_warnings: list[str] | None = None,
+        validation_errors: list[str] | None = None,
+        diff_summary: dict[str, Any] | None = None,
+        approved_at: datetime | None = None,
+        approved_by: str | None = None,
+        save_result: dict[str, Any] | None = None,
+        task_record_id: int | None = None,
+    ) -> PersistedProductPatch | None:
+        """Update lifecycle metadata for one persisted patch and return the refreshed record."""
 
 
 class ProductAggregateRepositoryPort(Protocol):

@@ -8,6 +8,7 @@ from app.application.services.product_ai import ProductAIContextBuilderService
 from app.application.services.product_payload import BuildSavePayloadService
 from app.application.services.product_patch_validation import ProductPatchValidationService
 from app.application.services.product_preview import PreviewProductPatchService
+from app.application.services.product_save import ApplyProductPatchService, SaveProductPatchService
 from app.infrastructure.ai import OpenAIProductPatchGateway
 from app.infrastructure.settings import Settings, get_settings
 
@@ -15,12 +16,8 @@ from app.infrastructure.settings import Settings, get_settings
 @lru_cache(maxsize=1)
 def get_payload_service() -> BuildSavePayloadService:
     """Return a cached payload builder service instance for API handlers."""
-    product_repository = ProductRepository()
-    snapshot_repository = SnapshotRepository(product_repository=product_repository)
     return BuildSavePayloadService(
-        product_repository=product_repository,
-        snapshot_repository=snapshot_repository,
-        patch_repository=PatchRepository(),
+        snapshot_repository=SnapshotRepository(),
         task_repository=TaskRepository(),
     )
 
@@ -82,6 +79,31 @@ def get_preview_patch_service() -> PreviewProductPatchService:
         ai_context_builder=ProductAIContextBuilderService(),
         patch_validator=ProductPatchValidationService(),
         patch_generator=patch_generator,
+    )
+
+
+@lru_cache(maxsize=1)
+def get_save_patch_service() -> SaveProductPatchService:
+    """Return a cached service that applies, saves, and verifies persisted draft patches."""
+    product_repository = ProductRepository()
+    snapshot_repository = SnapshotRepository(product_repository=product_repository)
+    aggregate_repository = ProductAggregateRepository(
+        product_repository=product_repository,
+        snapshot_repository=snapshot_repository,
+    )
+    aggregate_service = GetProductAggregateService(aggregate_repository=aggregate_repository)
+    refresh_service = RefreshProductAggregateService(
+        snapshot_repository=snapshot_repository,
+        task_repository=TaskRepository(),
+        aggregate_repository=aggregate_repository,
+    )
+    return SaveProductPatchService(
+        aggregate_service=aggregate_service,
+        refresh_service=refresh_service,
+        snapshot_repository=snapshot_repository,
+        patch_repository=PatchRepository(),
+        task_repository=TaskRepository(),
+        apply_patch_service=ApplyProductPatchService(),
     )
 
 

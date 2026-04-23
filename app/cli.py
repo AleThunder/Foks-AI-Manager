@@ -5,7 +5,7 @@ import json
 from typing import Any
 
 from app.application.services.product_payload import BuildSavePayloadService
-from app.infrastructure.db import PatchRepository, ProductRepository, SnapshotRepository, TaskRepository, configure_database, upgrade_database
+from app.infrastructure.db import SnapshotRepository, TaskRepository, configure_database, upgrade_database
 from app.infrastructure.logging import bind_log_context, configure_logging, get_logger, reset_log_context
 from app.infrastructure.settings import get_settings
 
@@ -43,11 +43,8 @@ def main() -> None:
         raise SystemExit("Set FOKS_USERNAME and FOKS_PASSWORD in .env/config or pass --username/--password")
 
     mids = [mid.strip() for mid in args.mids.split(",") if mid.strip()] or None
-    product_repository = ProductRepository()
     service = BuildSavePayloadService(
-        product_repository=product_repository,
-        snapshot_repository=SnapshotRepository(product_repository=product_repository),
-        patch_repository=PatchRepository(),
+        snapshot_repository=SnapshotRepository(),
         task_repository=TaskRepository(),
     )
     try:

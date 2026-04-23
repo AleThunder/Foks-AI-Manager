@@ -9,43 +9,65 @@ from app.infrastructure.ai.openai_gateway import OpenAIProductPatchGateway
 
 
 class FakeParsedMessage:
+    """Mimic the parsed message object returned by the OpenAI SDK."""
+
     def __init__(self, parsed: AIProductPatchModel) -> None:
+        """Expose the parsed payload and refusal fields used by the gateway."""
         self.parsed = parsed
         self.refusal = None
 
 
 class FakeParsedChoice:
+    """Wrap one parsed message inside a completion choice container."""
+
     def __init__(self, parsed: AIProductPatchModel) -> None:
+        """Build a choice with exactly one parsed message."""
         self.message = FakeParsedMessage(parsed)
 
 
 class FakeParsedCompletion:
+    """Mimic the parsed completion object returned by `chat.completions.parse()`."""
+
     def __init__(self, parsed: AIProductPatchModel) -> None:
+        """Expose one parsed choice for the gateway under test."""
         self.choices = [FakeParsedChoice(parsed)]
 
 
 class FakeChatCompletions:
+    """Capture parse requests and return a canned parsed completion."""
+
     def __init__(self, parsed: AIProductPatchModel) -> None:
+        """Store the completion returned by the fake `parse()` call."""
         self._completion = FakeParsedCompletion(parsed)
         self.last_request: dict[str, object] | None = None
 
     def parse(self, **kwargs: object) -> FakeParsedCompletion:
+        """Record the SDK call arguments and return the prepared completion."""
         self.last_request = dict(kwargs)
         return self._completion
 
 
 class FakeChat:
+    """Expose the fake completions resource under `client.chat`."""
+
     def __init__(self, parsed: AIProductPatchModel) -> None:
+        """Attach the fake completions API used by the gateway."""
         self.completions = FakeChatCompletions(parsed)
 
 
 class FakeClient:
+    """Provide the minimal OpenAI client surface used by the gateway."""
+
     def __init__(self, parsed: AIProductPatchModel) -> None:
+        """Attach the fake chat resource expected by the production gateway."""
         self.chat = FakeChat(parsed)
 
 
 class OpenAIGatewayTests(unittest.TestCase):
+    """Verify OpenAI gateway behavior around structured SDK parsing."""
+
     def test_gateway_uses_sdk_parse_and_parses_structured_response(self) -> None:
+        """Gateway calls should use centralized prompts and parse into normalized drafts."""
         parsed_patch = AIProductPatchModel.model_validate(
             {
                 "product_id": "prod-1",

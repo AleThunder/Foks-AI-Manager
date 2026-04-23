@@ -37,12 +37,16 @@ class PreviewProductPatchService:
         *,
         article: str | None = None,
         product_id: int | None = None,
+        mids: list[str] | None = None,
+        created_by: str = "",
         instructions: str | None = None,
         raw_draft: dict[str, Any] | None = None,
     ) -> PersistedProductPatch:
         """Create a previewable persisted draft either from AI or from a manual normalized patch."""
         if article is None and product_id is None:
             raise ValueError("Either article or product_id must be provided.")
+        if mids is not None and not mids:
+            raise ValueError("If mids is provided it must contain at least one marketplace id.")
 
         aggregate = (
             self._aggregate_service.get_by_article(article=article)
@@ -69,7 +73,7 @@ class PreviewProductPatchService:
             if resolved_raw_draft is None:
                 if self._patch_generator is None:
                     raise RuntimeError("AI patch generator is not configured.")
-                context = self._ai_context_builder.build_from_aggregate(aggregate)
+                context = self._ai_context_builder.build_from_aggregate(aggregate, mids=mids)
                 resolved_raw_draft = self._patch_generator.generate_patch(
                     context=context,
                     instructions=instructions or PRODUCT_PATCH_DEFAULT_INSTRUCTIONS,
@@ -78,6 +82,7 @@ class PreviewProductPatchService:
             validation = self._patch_validator.validate(
                 aggregate=aggregate,
                 raw_patch=resolved_raw_draft,
+                allowed_marketplaces=mids,
             )
             status = "failed" if validation.errors else "draft"
             patch_id = self._patch_repository.save_patch(
@@ -87,6 +92,7 @@ class PreviewProductPatchService:
                 pid=aggregate.identity.pid,
                 base_snapshot_id=aggregate.latest_snapshot.id,
                 status=status,
+                created_by=created_by,
                 save_url="",
                 headers={},
                 payload={},

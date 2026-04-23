@@ -47,7 +47,6 @@ class ModalParseResult:
     market_cat_names: dict[str, str] = field(default_factory=dict)
     marketplaces_meta: dict[str, MarketplaceMeta] = field(default_factory=dict)
     extinfo_by_market: dict[str, dict[str, Any]] = field(default_factory=dict)
-    pricesinfo_by_market: dict[str, dict[str, Any]] = field(default_factory=dict)
 
     def to_form_fields(self) -> dict[str, Any]:
         """Flatten the normalized modal structure back into the form-like shape used by payload building."""
@@ -62,11 +61,11 @@ class ModalParseResult:
 
     def get_marketplace_values(self, field_name: str) -> dict[str, Any]:
         """Return one marketplace field across all marketplaces as a simple mapping."""
-        result: dict[str, Any] = {}
-        for market_id, market_fields in self.marketplace_fields.items():
-            if field_name in market_fields:
-                result[market_id] = market_fields[field_name]
-        return result
+        return {
+            market_id: market_fields[field_name]
+            for market_id, market_fields in self.marketplace_fields.items()
+            if field_name in market_fields
+        }
 
 
 @dataclass(slots=True)
@@ -192,6 +191,7 @@ class ProductPatchStatus:
     status: str
     base_snapshot_id: int | None = None
     task_id: int | None = None
+    created_by: str = ""
     save_url: str = ""
     validation_warnings: list[str] = field(default_factory=list)
     validation_errors: list[str] = field(default_factory=list)
@@ -230,6 +230,7 @@ class PersistedProductPatch:
     patch: ProductPatch
     base_snapshot_id: int | None = None
     task_id: int | None = None
+    created_by: str = ""
     save_url: str = ""
     headers: dict[str, Any] = field(default_factory=dict)
     payload: dict[str, Any] = field(default_factory=dict)
@@ -241,8 +242,3 @@ class PersistedProductPatch:
     save_result: dict[str, Any] = field(default_factory=dict)
     created_at: datetime | None = None
     updated_at: datetime | None = None
-
-
-CategoryFeatureDefinition = FeatureValue
-MarketplaceReadResult = MarketplaceSnapshot
-ProductReadResult = ProductSnapshot

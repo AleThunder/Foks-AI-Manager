@@ -16,7 +16,10 @@ from app.infrastructure.logging import (
 
 
 class LoggingTests(unittest.TestCase):
+    """Verify that logging helpers emit the expected structured output."""
+
     def test_json_formatter_includes_request_and_task_ids(self) -> None:
+        """Structured log formatting should include bound request and task identifiers."""
         tokens = bind_log_context(request_id="req-1", task_id="task-1")
         try:
             record = logging.LogRecord(
@@ -37,6 +40,7 @@ class LoggingTests(unittest.TestCase):
         self.assertEqual(payload["logger"], "app.integration.foks.read")
 
     def test_configure_logging_writes_logs_to_files(self) -> None:
+        """Log routing should split application and integration events into the right files."""
         with tempfile.TemporaryDirectory() as temp_dir:
             try:
                 configure_logging(force=True, log_dir=temp_dir)

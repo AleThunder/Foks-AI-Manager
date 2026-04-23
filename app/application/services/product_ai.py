@@ -74,14 +74,20 @@ class AIProductPatchModel(BaseModel):
 class ProductAIContextBuilderService:
     """Build a short, stable AI context from the persisted product aggregate."""
 
-    def build_from_aggregate(self, aggregate: ProductAggregate) -> dict[str, Any]:
+    def build_from_aggregate(
+        self,
+        aggregate: ProductAggregate,
+        *,
+        mids: list[str] | None = None,
+    ) -> dict[str, Any]:
         """Return only the product data required by the AI draft generation step."""
         snapshot = aggregate.latest_snapshot
         if snapshot is None:
             raise LookupError(f"Product '{aggregate.identity.article}' does not have a persisted snapshot.")
 
+        selected_marketplaces = [market_id for market_id in AI_MARKETPLACES if mids is None or market_id in mids]
         marketplaces: list[dict[str, Any]] = []
-        for market_id in AI_MARKETPLACES:
+        for market_id in selected_marketplaces:
             marketplace = aggregate.marketplaces.get(market_id)
             if marketplace is None:
                 continue

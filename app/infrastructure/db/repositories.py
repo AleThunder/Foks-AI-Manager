@@ -339,6 +339,9 @@ class SnapshotRepository:
 class ProductAggregateRepository:
     """Load the API-facing aggregate from the latest persisted product state."""
 
+    DRAFT_WORKFLOW_STATUSES = ("draft", "approved", "saved", "failed")
+    SAVE_WORKFLOW_STATUSES = ("saved", "failed")
+
     def __init__(
         self,
         product_repository: ProductRepository | None = None,
@@ -384,22 +387,16 @@ class ProductAggregateRepository:
             return None
 
         snapshot = self._snapshot_repository._to_domain(snapshot_record)
-        draft_patch_record = session.scalars(
-            select(ProductPatchRecord)
-            .where(
-                ProductPatchRecord.product_id == product_record.id,
-                ProductPatchRecord.status.in_(("draft", "approved", "saved", "failed")),
-            )
-            .order_by(ProductPatchRecord.id.desc())
-        ).first()
-        save_patch_record = session.scalars(
-            select(ProductPatchRecord)
-            .where(
-                ProductPatchRecord.product_id == product_record.id,
-                ProductPatchRecord.status.in_(("saved", "failed")),
-            )
-            .order_by(ProductPatchRecord.id.desc())
-        ).first()
+        draft_patch_record = self._get_latest_patch_record(
+            session=session,
+            product_record_id=product_record.id,
+            statuses=self.DRAFT_WORKFLOW_STATUSES,
+        )
+        save_patch_record = self._get_latest_patch_record(
+            session=session,
+            product_record_id=product_record.id,
+            statuses=self.SAVE_WORKFLOW_STATUSES,
+        )
         draft_status = self._to_patch_status(draft_patch_record)
         save_status = self._to_patch_status(save_patch_record)
 
@@ -433,6 +430,23 @@ class ProductAggregateRepository:
             ),
         )
 
+    def _get_latest_patch_record(
+        self,
+        *,
+        session: Session,
+        product_record_id: int,
+        statuses: tuple[str, ...],
+    ) -> ProductPatchRecord | None:
+        """Load the newest patch row for one product within a workflow status subset."""
+        return session.scalars(
+            select(ProductPatchRecord)
+            .where(
+                ProductPatchRecord.product_id == product_record_id,
+                ProductPatchRecord.status.in_(statuses),
+            )
+            .order_by(ProductPatchRecord.id.desc())
+        ).first()
+
     def _to_patch_status(self, patch_record: ProductPatchRecord | None) -> ProductPatchStatus | None:
         """Convert one patch row into the API-facing workflow status model."""
         if patch_record is None:
@@ -447,6 +461,7 @@ class ProductAggregateRepository:
             validation_warnings=list(patch_record.validation_warnings or []),
             validation_errors=list(patch_record.validation_errors or []),
             diff_summary=dict(patch_record.diff_summary or {}),
+            created_by=patch_record.created_by or "",
             approved_at=patch_record.approved_at,
             approved_by=patch_record.approved_by or "",
             save_result=dict(patch_record.save_result or {}),
@@ -467,6 +482,7 @@ class PatchRepository:
         pid: str,
         base_snapshot_id: int | None = None,
         status: str = "built",
+        created_by: str | None = None,
         save_url: str,
         headers: dict[str, Any],
         payload: dict[str, Any],
@@ -488,6 +504,7 @@ class PatchRepository:
                 base_snapshot_id=base_snapshot_id,
                 offer_id=patch.offer_id,
                 status=status,
+                created_by=created_by,
                 save_url=save_url,
                 headers=headers,
                 payload=payload,
@@ -511,6 +528,57 @@ class PatchRepository:
             record = session.get(ProductPatchRecord, patch_id)
             if record is None:
                 return None
+            return self._to_domain(record)
+
+    def update_patch(
+        self,
+        patch_id: int,
+        *,
+        status: str | None = None,
+        created_by: str | None = None,
+        save_url: str | None = None,
+        headers: dict[str, Any] | None = None,
+        payload: dict[str, Any] | None = None,
+        validation_warnings: list[str] | None = None,
+        validation_errors: list[str] | None = None,
+        diff_summary: dict[str, Any] | None = None,
+        approved_at: datetime | None = None,
+        approved_by: str | None = None,
+        save_result: dict[str, Any] | None = None,
+        task_record_id: int | None = None,
+    ) -> PersistedProductPatch | None:
+        """Update one patch lifecycle record and return its refreshed domain representation."""
+        with session_scope() as session:
+            record = session.get(ProductPatchRecord, patch_id)
+            if record is None:
+                return None
+
+            if status is not None:
+                record.status = status
+            if created_by is not None:
+                record.created_by = created_by
+            if save_url is not None:
+                record.save_url = save_url
+            if headers is not None:
+                record.headers = headers
+            if payload is not None:
+                record.payload = payload
+            if validation_warnings is not None:
+                record.validation_warnings = list(validation_warnings)
+            if validation_errors is not None:
+                record.validation_errors = list(validation_errors)
+            if diff_summary is not None:
+                record.diff_summary = dict(diff_summary)
+            if approved_at is not None:
+                record.approved_at = approved_at
+            if approved_by is not None:
+                record.approved_by = approved_by
+            if save_result is not None:
+                record.save_result = dict(save_result)
+            if task_record_id is not None:
+                record.task_id = task_record_id
+            session.flush()
+            session.refresh(record)
             return self._to_domain(record)
 
     def _serialize_marketplace_patches(
@@ -577,6 +645,7 @@ class PatchRepository:
             patch=patch,
             base_snapshot_id=record.base_snapshot_id,
             task_id=record.task_id,
+            created_by=record.created_by or "",
             save_url=record.save_url,
             headers=dict(record.headers or {}),
             payload=dict(record.payload or {}),
@@ -589,7 +658,3 @@ class PatchRepository:
             created_at=record.created_at,
             updated_at=record.updated_at,
         )
-
-
-ProductSnapshotRepository = SnapshotRepository
-ProductPatchRepository = PatchRepository

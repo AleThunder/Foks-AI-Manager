@@ -12,7 +12,10 @@ from app.infrastructure.settings import get_settings
 
 
 class ProductAiServiceTests(unittest.TestCase):
+    """Cover AI context building and draft validation against persisted aggregates."""
+
     def setUp(self) -> None:
+        """Seed an isolated database with one product aggregate for AI-facing tests."""
         self._temp_dir = tempfile.TemporaryDirectory()
         self._database_url = f"sqlite:///{Path(self._temp_dir.name) / 'test.db'}"
         configure_database(url=self._database_url, force=True)
@@ -89,6 +92,7 @@ class ProductAiServiceTests(unittest.TestCase):
         )
 
     def tearDown(self) -> None:
+        """Restore the default application database configuration after each test."""
         settings = get_settings()
         configure_database(
             url=settings.sqlalchemy_database_url,
@@ -98,6 +102,7 @@ class ProductAiServiceTests(unittest.TestCase):
         self._temp_dir.cleanup()
 
     def test_context_builder_returns_short_stable_context_for_prom_and_rozetka(self) -> None:
+        """Context building should keep only the stable product slice needed by AI."""
         aggregate = self._aggregate_repository.get_latest_aggregate_by_article("ART-777")
         assert aggregate is not None
 
@@ -112,6 +117,7 @@ class ProductAiServiceTests(unittest.TestCase):
         self.assertEqual(context["marketplaces"][1]["features"][0]["allowed_values"], ["64 GB", "128 GB"])
 
     def test_validator_rejects_unknown_fields_and_invalid_feature_values(self) -> None:
+        """Validation should reject non-allowlisted fields and schema-invalid feature values."""
         aggregate = self._aggregate_repository.get_latest_aggregate_by_article("ART-777")
         assert aggregate is not None
 

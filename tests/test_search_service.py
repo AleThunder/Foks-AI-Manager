@@ -7,7 +7,10 @@ from app.infrastructure.foks.search_parser import SearchHtmlParser
 
 
 class SearchServiceTests(unittest.TestCase):
+    """Verify search parsing and pid resolution from product search HTML."""
+
     def test_parser_and_resolver_pick_best_pid_when_multiple_products_found(self) -> None:
+        """Resolver should choose the candidate whose snippet matches the requested article."""
         article = "ART-777"
         html = """
         <html>
@@ -33,6 +36,7 @@ class SearchServiceTests(unittest.TestCase):
         )
 
     def test_parser_falls_back_to_hex_candidates(self) -> None:
+        """Parser should still recover hex-like pid candidates from sparse HTML."""
         html = "<div>Candidate cccccccccccccccccccccccccccccccc somewhere in html</div>"
 
         candidates = SearchHtmlParser.parse(html)

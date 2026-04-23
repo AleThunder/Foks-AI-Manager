@@ -7,7 +7,10 @@ from app.infrastructure.foks.product_feature_loader import ProductFeatureLoader
 
 
 class FakeSession:
+    """Return deterministic feature payloads for loader unit tests."""
+
     def get_json(self, path: str, params: dict[str, str] | None = None):
+        """Return fixture payloads keyed by the requested integration path."""
         if path.startswith("/api/v1/product/features/"):
             return [
                 {"name": "Color", "values": ["Black"]},
@@ -22,7 +25,10 @@ class FakeSession:
 
 
 class FeatureLoaderTests(unittest.TestCase):
+    """Verify that raw FOKS feature payloads normalize into domain structures."""
+
     def test_product_feature_loader_returns_raw_and_normalized_features(self) -> None:
+        """Product feature loading should preserve raw data and normalize value lists."""
         loader = ProductFeatureLoader(session=FakeSession())
 
         raw_features, normalized_features = loader.load(product_id="prod-1", mid="prom")
@@ -32,6 +38,7 @@ class FeatureLoaderTests(unittest.TestCase):
         self.assertEqual(normalized_features["Memory"].values, ["128 GB"])
 
     def test_category_feature_loader_returns_schema_and_allowed_feature_map(self) -> None:
+        """Category schema loading should expose allowed options and facet metadata."""
         loader = CategoryFeatureLoader(session=FakeSession())
 
         schema_raw, allowed_features = loader.load(mid="prom", market_category_id="cat-1")

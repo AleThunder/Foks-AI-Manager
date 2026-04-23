@@ -22,17 +22,24 @@ from app.infrastructure.settings import get_settings
 
 
 class FakePatchGenerator:
+    """Return a canned normalized draft for preview service tests."""
+
     def __init__(self, response_payload: dict[str, object]) -> None:
+        """Store the draft payload returned by the fake generator."""
         self.response_payload = response_payload
 
     def generate_patch(self, *, context: dict[str, object], instructions: str) -> dict[str, object]:
+        """Capture the AI inputs and return the prepared draft payload."""
         self.last_context = context
         self.last_instructions = instructions
         return self.response_payload
 
 
 class ProductPreviewTests(unittest.TestCase):
+    """Cover preview generation, validation, and persisted patch lifecycle behavior."""
+
     def setUp(self) -> None:
+        """Seed an isolated database with one persisted product aggregate for preview tests."""
         self._temp_dir = tempfile.TemporaryDirectory()
         self._database_url = f"sqlite:///{Path(self._temp_dir.name) / 'test.db'}"
         configure_database(url=self._database_url, force=True)
@@ -89,6 +96,7 @@ class ProductPreviewTests(unittest.TestCase):
         )
 
     def tearDown(self) -> None:
+        """Restore the default application database configuration after each test."""
         settings = get_settings()
         configure_database(
             url=settings.sqlalchemy_database_url,
@@ -98,6 +106,7 @@ class ProductPreviewTests(unittest.TestCase):
         self._temp_dir.cleanup()
 
     def test_preview_service_persists_draft_with_diff_summary(self) -> None:
+        """Valid AI output should persist as a draft with sanitation warnings and diff metadata."""
         service = PreviewProductPatchService(
             aggregate_service=self._aggregate_service,
             patch_repository=self._patch_repository,
@@ -124,9 +133,14 @@ class ProductPreviewTests(unittest.TestCase):
             ),
         )
 
-        persisted_patch = service.preview(article="ART-777", instructions="Improve the listing.")
+        persisted_patch = service.preview(
+            article="ART-777",
+            created_by="ai.operator",
+            instructions="Improve the listing.",
+        )
 
         self.assertEqual(persisted_patch.status, "draft")
+        self.assertEqual(persisted_patch.created_by, "ai.operator")
         self.assertEqual(persisted_patch.patch.marketplace_patches["prom"].fields["nameExt"], "New title")
         self.assertEqual(
             persisted_patch.patch.marketplace_patches["prom"].fields["descriptionExtRu"],
@@ -138,6 +152,7 @@ class ProductPreviewTests(unittest.TestCase):
         self.assertEqual(persisted_patch.validation_errors, [])
 
     def test_preview_service_marks_invalid_manual_draft_as_failed(self) -> None:
+        """Invalid manual drafts should persist as failed lifecycle records with validation errors."""
         service = PreviewProductPatchService(
             aggregate_service=self._aggregate_service,
             patch_repository=self._patch_repository,

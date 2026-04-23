@@ -2,9 +2,7 @@ from app.infrastructure.db.migrations import get_alembic_config, upgrade_databas
 from app.infrastructure.db.repositories import (
     PatchRepository,
     ProductAggregateRepository,
-    ProductPatchRepository,
     ProductRepository,
-    ProductSnapshotRepository,
     SnapshotRepository,
     TaskRepository,
 )
@@ -14,8 +12,6 @@ __all__ = [
     "PatchRepository",
     "ProductAggregateRepository",
     "ProductRepository",
-    "ProductPatchRepository",
-    "ProductSnapshotRepository",
     "SnapshotRepository",
     "TaskRepository",
     "configure_database",

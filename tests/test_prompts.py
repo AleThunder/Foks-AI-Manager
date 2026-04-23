@@ -11,7 +11,10 @@ from app.application.services.prompts import (
 
 
 class ProductPromptTests(unittest.TestCase):
+    """Verify centralized prompt assembly for OpenAI product draft generation."""
+
     def test_build_product_patch_messages_uses_centralized_prompts(self) -> None:
+        """Prompt building should reuse the centralized system and default instruction strings."""
         messages = build_product_patch_messages(
             context={"product": {"identity": {"article": "ART-777"}}},
             instructions=PRODUCT_PATCH_DEFAULT_INSTRUCTIONS,

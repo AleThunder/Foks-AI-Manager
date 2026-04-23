@@ -30,6 +30,7 @@ class ProductPatchValidationService:
         *,
         aggregate: ProductAggregate,
         raw_patch: dict[str, Any],
+        allowed_marketplaces: list[str] | None = None,
     ) -> ProductPatchValidationResult:
         """Return a normalized patch together with validation warnings, errors, and diff summary."""
         warnings: list[str] = []
@@ -44,6 +45,7 @@ class ProductPatchValidationService:
         if raw_patch.get("flags"):
             errors.append("AI draft cannot modify top-level flags.")
 
+        selected_marketplaces = tuple(allowed_marketplaces or AI_MARKETPLACES)
         raw_marketplace_patches = raw_patch.get("marketplace_patches") or []
         if not isinstance(raw_marketplace_patches, list):
             errors.append("marketplace_patches must be an array.")
@@ -58,7 +60,7 @@ class ProductPatchValidationService:
                 continue
 
             market_id = str(raw_marketplace_patch.get("market_id", "") or "").strip()
-            if market_id not in AI_MARKETPLACES:
+            if market_id not in selected_marketplaces:
                 errors.append(f"Marketplace '{market_id or '?'}' is not allowed for AI drafts.")
                 continue
             if market_id in seen_marketplaces:
