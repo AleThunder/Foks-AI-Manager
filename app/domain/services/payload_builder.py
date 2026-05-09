@@ -102,7 +102,7 @@ class SavePayloadBuilder:
     @staticmethod
     def _drop_noise(payload: dict[str, Any]) -> None:
         """Remove fields that should never be included in the final save payload."""
-        noisy_keys = {"descriptionText"}
+        noisy_keys: set[str] = set()
         for key in list(payload.keys()):
             if key in noisy_keys:
                 payload.pop(key, None)
