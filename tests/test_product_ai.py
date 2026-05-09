@@ -4,7 +4,15 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from app.application.services.product_ai import ProductAIContextBuilderService
+from app.application.services.product_ai import (
+    AIProductPatchModel,
+    MarketplaceDescriptionPartsModel,
+    MarketplaceNameModel,
+    MarketplaceTranslationModel,
+    ProductAIContextBuilderService,
+    ProductIdentityAnalysisModel,
+    ProductMarketingAnalysisModel,
+)
 from app.application.services.product_patch_validation import ProductPatchValidationService
 from app.domain.models import FeatureValue, MarketplaceMeta, MarketplaceSnapshot, ProductSnapshot
 from app.infrastructure.db import ProductAggregateRepository, ProductRepository, SnapshotRepository, configure_database, upgrade_database
@@ -146,6 +154,78 @@ class ProductAiServiceTests(unittest.TestCase):
         self.assertIn("AI draft cannot modify top-level basic_fields.", validation.errors)
         self.assertTrue(any("Field 'priceExt'" in error for error in validation.errors))
         self.assertTrue(any("invalid values" in error for error in validation.errors))
+
+    def test_ai_step_models_validate_intermediate_generation_payloads(self) -> None:
+        """Intermediate AI payloads should be typed before they are assembled into a patch."""
+        identity = ProductIdentityAnalysisModel(
+            product_type="Фен для волос",
+            brand="BaByliss PRO",
+            model="Falco BAB8550BE",
+            additional_info="чорний",
+            category_hint="Фени",
+            source_confidence=0.95,
+        )
+        marketing = ProductMarketingAnalysisModel(
+            icp="Власники салонів краси.",
+            customer_pains=["Потрібна надійність"],
+            product_benefits=["Професійний мотор"],
+            seo_keywords=["фен для волосся"],
+            marketing_angles=["для щоденного використання"],
+        )
+        name = MarketplaceNameModel(market_id="rozetka", name_ru="Фен BaByliss PRO Falco BAB8550BE")
+        description = MarketplaceDescriptionPartsModel(
+            market_id="rozetka",
+            intro_block="<p>Intro</p>",
+            benefits_block="<ul><li>Benefit</li></ul>",
+            usage_or_specs_block="<p>Specs</p>",
+            trust_block="<p>Trust</p>",
+            summary_block="<p>Summary</p>",
+        )
+        translation = MarketplaceTranslationModel(
+            market_id="rozetka",
+            name_ua="Фен BaByliss PRO Falco BAB8550BE",
+            description_ua="<p>Опис українською</p>",
+        )
+
+        patch = AIProductPatchModel.model_validate(
+            {
+                "product_id": "prod-1",
+                "offer_id": "offer-1",
+                "marketplace_patches": [
+                    {
+                        "market_id": name.market_id,
+                        "fields": {
+                            "nameExt": name.name_ru,
+                            "descriptionExtRu": description.description_ru,
+                            "nameExtUa": translation.name_ua,
+                            "descriptionExtUa": translation.description_ua,
+                        },
+                    }
+                ],
+            }
+        )
+
+        self.assertEqual(identity.brand, "BaByliss PRO")
+        self.assertEqual(marketing.customer_pains, ["Потрібна надійність"])
+        self.assertIn("<p>Summary</p>", description.description_ru)
+        self.assertEqual(patch.marketplace_patches[0].fields.nameExt, name.name_ru)
+
+    def test_marketplace_name_model_rejects_titles_over_seventy_characters(self) -> None:
+        """Marketplace titles should enforce the SEO/business limit in schema validation."""
+        with self.assertRaises(ValueError):
+            MarketplaceNameModel(
+                market_id="rozetka",
+                name_ru="X" * 71,
+            )
+
+    def test_marketplace_translation_model_rejects_ua_titles_over_seventy_characters(self) -> None:
+        """Translated marketplace titles should use the same SEO/business limit as Russian titles."""
+        with self.assertRaises(ValueError):
+            MarketplaceTranslationModel(
+                market_id="rozetka",
+                name_ua="X" * 71,
+                description_ua="<p>Опис українською</p>",
+            )
 
 
 if __name__ == "__main__":

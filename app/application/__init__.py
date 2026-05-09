@@ -1,4 +1,4 @@
 from app.application.services.product_read import GetProductByArticleService
-from app.application.services.product_payload import BuildSavePayloadService
+from app.application.services.product_payload import PrepareSavePayloadService
 
-__all__ = ["BuildSavePayloadService", "GetProductByArticleService"]
+__all__ = ["GetProductByArticleService", "PrepareSavePayloadService"]

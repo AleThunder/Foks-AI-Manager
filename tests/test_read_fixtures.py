@@ -18,6 +18,8 @@ class ReadFixtureRegressionTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls) -> None:
         """Load the real modal and save payload fixtures once for the whole test class."""
+        if not MODAL_FIXTURE_PATH.exists() or not SAVE_FIXTURE_PATH.exists():
+            raise unittest.SkipTest("Real FOKS fixture files are not available in tests/fixtures.")
         cls.modal_html = MODAL_FIXTURE_PATH.read_text(encoding="utf-8")
         cls.save_payload = json.loads(SAVE_FIXTURE_PATH.read_text(encoding="utf-8"))
         cls.parsed_modal = ModalParser.parse(cls.modal_html)
