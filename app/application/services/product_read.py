@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from app.application.ports import SnapshotRepositoryPort, TaskRepositoryPort
 from app.domain.models import MarketplaceMeta, MarketplaceSnapshot, ProductSnapshot
+from app.domain.services.payload_builder import SavePayloadBuilder
 from app.infrastructure.foks.category_feature_loader import CategoryFeatureLoader
 from app.infrastructure.foks.modal_parser import ModalParser
 from app.infrastructure.foks.product_feature_loader import ProductFeatureLoader
@@ -121,6 +122,17 @@ class GetProductByArticleService:
                     extinfo=dict(modal.extinfo_by_market.get(mid, {})),
                 )
 
+            base_save_payload = SavePayloadBuilder.build(
+                modal=modal,
+                product_features={
+                    market_id: marketplace.raw_product_features
+                    for market_id, marketplace in marketplaces.items()
+                },
+                category_schemas={
+                    market_id: marketplace.raw_category_features
+                    for market_id, marketplace in marketplaces.items()
+                },
+            )
             snapshot = ProductSnapshot(
                 article=article,
                 pid=pid,
@@ -130,6 +142,7 @@ class GetProductByArticleService:
                 basic_fields=dict(modal.basic_fields),
                 flags=dict(modal.flags),
                 marketplaces=marketplaces,
+                base_save_payload=base_save_payload,
             )
             product_record_id, persisted_snapshot = self._snapshot_repository.save_snapshot(
                 snapshot,

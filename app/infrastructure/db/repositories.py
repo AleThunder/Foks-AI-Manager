@@ -300,6 +300,7 @@ class SnapshotRepository:
             basic_fields=dict(snapshot_record.basic_fields or {}),
             flags=dict(snapshot_record.flags or {}),
             marketplaces=marketplaces,
+            base_save_payload=dict((snapshot_record.raw_snapshot or {}).get("base_save_payload") or {}),
         )
 
     def _serialize_snapshot(self, snapshot: ProductSnapshot) -> dict[str, Any]:
@@ -312,6 +313,7 @@ class SnapshotRepository:
             "csrf_save_token": snapshot.csrf_save_token,
             "basic_fields": snapshot.basic_fields,
             "flags": snapshot.flags,
+            "base_save_payload": snapshot.base_save_payload,
             "marketplaces": {
                 market_id: {
                     "market_id": market_snapshot.market_id,

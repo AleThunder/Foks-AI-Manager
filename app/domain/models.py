@@ -94,6 +94,7 @@ class ProductSnapshot:
     basic_fields: dict[str, Any] = field(default_factory=dict)
     flags: dict[str, bool] = field(default_factory=dict)
     marketplaces: dict[str, MarketplaceSnapshot] = field(default_factory=dict)
+    base_save_payload: dict[str, Any] = field(default_factory=dict)
 
     def to_modal_parse_result(self) -> ModalParseResult:
         """Convert the snapshot back into the normalized modal view used by payload building."""

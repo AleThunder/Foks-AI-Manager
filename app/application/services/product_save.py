@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from copy import deepcopy
 from dataclasses import replace
 from datetime import datetime, timezone
@@ -8,6 +9,7 @@ from typing import Any
 from app.application.ports import PatchRepositoryPort, SnapshotRepositoryPort, TaskRepositoryPort
 from app.application.services.product_aggregate import GetProductAggregateService, RefreshProductAggregateService
 from app.domain.models import FeatureValue, MarketplaceSnapshot, PersistedProductPatch, ProductPatch, ProductSnapshot
+from app.domain.services.feature_service import FeatureService
 from app.domain.services.payload_builder import SavePayloadBuilder
 from app.infrastructure.foks.session import FoksSession
 from app.infrastructure.logging import get_logger, get_task_id
@@ -26,19 +28,37 @@ class ApplyProductPatchService:
             for market_id in snapshot.marketplaces
         }
 
-        return ProductSnapshot(
+        patched_basic_fields = dict(snapshot.basic_fields)
+        patched_basic_fields.update(patch.basic_fields)
+        patched_flags = dict(snapshot.flags)
+        patched_flags.update(patch.flags)
+
+        patched_snapshot = ProductSnapshot(
             article=snapshot.article,
             pid=snapshot.pid,
             product_id=patch.product_id or snapshot.product_id,
             offer_id=patch.offer_id or snapshot.offer_id,
             csrf_save_token=snapshot.csrf_save_token,
-            basic_fields=dict(snapshot.basic_fields),
-            flags=dict(snapshot.flags),
+            basic_fields=patched_basic_fields,
+            flags=patched_flags,
             marketplaces=updated_marketplaces,
+            base_save_payload={},
+        )
+
+        return replace(
+            patched_snapshot,
+            base_save_payload=self._overlay_patch_on_base_payload(
+                base_payload=snapshot.base_save_payload,
+                patched_snapshot=patched_snapshot,
+                patch=patch,
+            ),
         )
 
     def build_save_payload(self, *, snapshot: ProductSnapshot) -> dict[str, Any]:
         """Build the final FOKS save payload from an already patched snapshot."""
+        if snapshot.base_save_payload:
+            return deepcopy(snapshot.base_save_payload)
+
         product_features = {
             market_id: self._build_product_feature_payload(marketplace)
             for market_id, marketplace in snapshot.marketplaces.items()
@@ -52,6 +72,105 @@ class ApplyProductPatchService:
             product_features=product_features,
             category_schemas=category_schemas,
         )
+
+    def _overlay_patch_on_base_payload(
+        self,
+        *,
+        base_payload: dict[str, Any],
+        patched_snapshot: ProductSnapshot,
+        patch: ProductPatch,
+    ) -> dict[str, Any]:
+        """Return a save payload copy where only normalized patch fields are overlaid."""
+        if not base_payload:
+            return {}
+
+        payload = deepcopy(base_payload)
+        payload["id"] = patched_snapshot.product_id
+        payload["offerId"] = patched_snapshot.offer_id
+
+        for field_name, value in patch.basic_fields.items():
+            payload[field_name] = value
+        for flag_name, value in patch.flags.items():
+            payload[flag_name] = bool(value)
+
+        for market_id, marketplace_patch in patch.marketplace_patches.items():
+            marketplace = patched_snapshot.marketplaces.get(market_id)
+            if marketplace is None:
+                continue
+
+            if marketplace_patch.market_cat_id is not None:
+                self._set_marketplace_payload_value(payload, "marketCatIds", market_id, marketplace.market_cat_id)
+            if marketplace_patch.market_cat_name is not None:
+                self._set_marketplace_payload_value(payload, "marketCatNames", market_id, marketplace.market_cat_name)
+
+            for field_name, value in marketplace_patch.fields.items():
+                self._set_marketplace_payload_value(payload, field_name, market_id, value)
+
+            if marketplace_patch.feature_values:
+                self._overlay_feature_payload(payload=payload, market_id=market_id, marketplace=marketplace)
+
+            if marketplace_patch.extinfo:
+                self._overlay_extended_info(payload=payload, market_id=market_id, extinfo=marketplace.extinfo)
+
+        return payload
+
+    def _set_marketplace_payload_value(
+        self,
+        payload: dict[str, Any],
+        field_name: str,
+        market_id: str,
+        value: Any,
+    ) -> None:
+        """Update both nested and flat FOKS marketplace field representations when present."""
+        if isinstance(payload.get(field_name), dict):
+            payload[field_name][market_id] = value
+        payload[f"{field_name}['{market_id}']"] = value
+
+    def _overlay_feature_payload(
+        self,
+        *,
+        payload: dict[str, Any],
+        market_id: str,
+        marketplace: MarketplaceSnapshot,
+    ) -> None:
+        """Update feature arrays for one marketplace while preserving FOKS ordering and facets."""
+        feature_names_by_market = payload.setdefault("featureNames", {})
+        feature_values_by_market = payload.setdefault("featureValues", {})
+        feature_facets_by_market = payload.setdefault("featureFacets", {})
+
+        names = list(feature_names_by_market.get(market_id) or [])
+        values = list(feature_values_by_market.get(market_id) or [])
+        facets = list(feature_facets_by_market.get(market_id) or [])
+        index_by_name = {str(name): index for index, name in enumerate(names)}
+
+        for feature_name, feature_value in marketplace.current_features.items():
+            serialized_value = FeatureService._serialize_feature_values(list(feature_value.values))
+            if feature_name in index_by_name:
+                values[index_by_name[feature_name]] = serialized_value
+                continue
+
+            names.append(feature_name)
+            values.append(serialized_value)
+            facets.append(str(bool(feature_value.facet)).lower())
+
+        feature_names_by_market[market_id] = names
+        feature_values_by_market[market_id] = values
+        feature_facets_by_market[market_id] = facets
+
+    def _overlay_extended_info(
+        self,
+        *,
+        payload: dict[str, Any],
+        market_id: str,
+        extinfo: dict[str, Any],
+    ) -> None:
+        """Update one marketplace entry inside FOKS' serialized extendedInfo payload."""
+        try:
+            extended_info = json.loads(str(payload.get("extendedInfo") or "{}"))
+        except json.JSONDecodeError:
+            extended_info = {}
+        extended_info[market_id] = extinfo
+        payload["extendedInfo"] = json.dumps(extended_info, ensure_ascii=False, separators=(",", ":"))
 
     def _apply_marketplace_patch(
         self,
@@ -273,6 +392,7 @@ class SaveProductPatchService:
                 json_body=payload,
                 csrf_token=csrf_token,
             )
+            self._ensure_save_response_ok(response_payload)
             save_post_completed = True
             self._save_logger.info(
                 "foks_save_request_completed",
@@ -453,3 +573,21 @@ class SaveProductPatchService:
             "post_save_snapshot_id": post_save_snapshot_id,
             "diff_summary": persisted_patch.diff_summary,
         }
+
+    def _ensure_save_response_ok(self, response_payload: Any) -> None:
+        """Fail only when FOKS explicitly reports a save rejection."""
+        if not self._is_explicit_save_rejection(response_payload):
+            return
+
+        raise RuntimeError(f"FOKS save was rejected: {response_payload!r}")
+
+    def _is_explicit_save_rejection(self, response_payload: Any) -> bool:
+        """Recognize structured failure responses without assuming FOKS always returns JSON."""
+        if isinstance(response_payload, dict):
+            if "ok" in response_payload:
+                ok_value = response_payload["ok"]
+                return ok_value is False or str(ok_value).strip().lower() in {"false", "error", "failed"}
+            for key in ("status", "result", "response"):
+                if str(response_payload.get(key, "")).strip().lower() in {"error", "failed"}:
+                    return True
+        return False

@@ -7,7 +7,14 @@ from pathlib import Path
 from app.application.services.product_aggregate import GetProductAggregateService
 from app.application.services.product_preview import PreviewProductPatchService
 from app.application.services.product_save import ApplyProductPatchService, SaveProductPatchService
-from app.domain.models import FeatureValue, MarketplaceMeta, MarketplaceSnapshot, ProductSnapshot
+from app.domain.models import (
+    FeatureValue,
+    MarketplaceMeta,
+    MarketplacePatch,
+    MarketplaceSnapshot,
+    ProductPatch,
+    ProductSnapshot,
+)
 from app.infrastructure.db import (
     PatchRepository,
     ProductAggregateRepository,
@@ -47,6 +54,34 @@ class FakeSaveSession:
         }
         self.saved_requests.append(request_payload)
         return {"ok": True, "saved": True}
+
+
+class NonOkSaveSession(FakeSaveSession):
+    """Return a non-success save response after recording the outgoing request."""
+
+    def post_json(self, path: str, json_body: dict[str, object], csrf_token: str) -> dict[str, object]:
+        """Record the save request and mimic a FOKS-level save rejection."""
+        request_payload = {
+            "path": path,
+            "json_body": json_body,
+            "csrf_token": csrf_token,
+        }
+        self.saved_requests.append(request_payload)
+        return {"ok": False, "error": "validation failed"}
+
+
+class HtmlSaveSession(FakeSaveSession):
+    """Mimic FOKS returning an authenticated HTML page after a save POST."""
+
+    def post_json(self, path: str, json_body: dict[str, object], csrf_token: str) -> str:
+        """Record the save request and return the non-JSON body observed from FOKS."""
+        request_payload = {
+            "path": path,
+            "json_body": json_body,
+            "csrf_token": csrf_token,
+        }
+        self.saved_requests.append(request_payload)
+        return "<!DOCTYPE html><html><head><title>FOKS - Панель управління</title></head><body></body></html>"
 
 
 class FakeRefreshService:
@@ -256,6 +291,75 @@ class ProductSaveTests(unittest.TestCase):
             ["White"],
         )
 
+    def test_apply_patch_overlays_existing_base_save_payload(self) -> None:
+        """Patch application should preserve FOKS save payload keys and only overlay changed fields."""
+        snapshot = ProductSnapshot(
+            article="ART-777",
+            pid="bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+            product_id="prod-1",
+            offer_id="offer-1",
+            csrf_save_token="csrf-123",
+            basic_fields={"name": "Demo product"},
+            marketplaces={
+                "prom": MarketplaceSnapshot(
+                    market_id="prom",
+                    meta=MarketplaceMeta(marketid="prom", catid="cat-prom"),
+                    market_cat_id="cat-prom",
+                    market_cat_name="Prom category",
+                    fields={
+                        "nameExt": "Old title",
+                        "descriptionExtRu": "<p>Old description</p>",
+                    },
+                    current_features={
+                        "Color": FeatureValue(name="Color", values=["Black"], facet=True),
+                    },
+                    allowed_features={
+                        "Color": FeatureValue(
+                            name="Color",
+                            options=["Black", "White"],
+                            facet=True,
+                            required=True,
+                        ),
+                    },
+                )
+            },
+            base_save_payload={
+                "id": "prod-1",
+                "offerId": "offer-1",
+                "name": "Demo product",
+                "nameExt": {"prom": "Old title"},
+                "nameExt['prom']": "Old title",
+                "descriptionExtRu['prom']": "<p>Old description</p>",
+                "featureNames": {"prom": ["Color"]},
+                "featureValues": {"prom": ["Black"]},
+                "featureFacets": {"prom": ["true"]},
+                "foksOnlyKey": "must stay untouched",
+            },
+        )
+        patch = ProductPatch(
+            product_id="prod-1",
+            offer_id="offer-1",
+            marketplace_patches={
+                "prom": MarketplacePatch(
+                    market_id="prom",
+                    fields={"nameExt": "New title"},
+                    feature_values={"Color": FeatureValue(name="Color", values=["White"])},
+                )
+            },
+        )
+
+        service = ApplyProductPatchService()
+        patched_snapshot = service.apply(snapshot=snapshot, patch=patch)
+        payload = service.build_save_payload(snapshot=patched_snapshot)
+
+        self.assertEqual(payload["foksOnlyKey"], "must stay untouched")
+        self.assertEqual(payload["nameExt"]["prom"], "New title")
+        self.assertEqual(payload["nameExt['prom']"], "New title")
+        self.assertEqual(payload["descriptionExtRu['prom']"], "<p>Old description</p>")
+        self.assertEqual(payload["featureNames"]["prom"], ["Color"])
+        self.assertEqual(payload["featureValues"]["prom"], ["White"])
+        self.assertEqual(payload["featureFacets"]["prom"], ["true"])
+
     def test_save_service_rejects_stale_patch(self) -> None:
         """Saving should fail when a newer persisted snapshot already exists for the same product."""
         preview_service = PreviewProductPatchService(
@@ -308,6 +412,102 @@ class ProductSaveTests(unittest.TestCase):
                 username="user",
                 password="pass",
             )
+
+    def test_save_service_rejects_non_ok_foks_response(self) -> None:
+        """Saving should stop immediately when FOKS does not acknowledge the payload with ok."""
+        preview_service = PreviewProductPatchService(
+            aggregate_service=self._aggregate_service,
+            patch_repository=self._patch_repository,
+            task_repository=self._task_repository,
+            patch_generator=None,
+        )
+        persisted_patch = preview_service.preview(
+            article="ART-777",
+            raw_draft={
+                "product_id": "prod-1",
+                "offer_id": "offer-1",
+                "marketplace_patches": [
+                    {
+                        "market_id": "prom",
+                        "fields": {"nameExt": "Saved title"},
+                    }
+                ],
+            },
+        )
+        save_service = SaveProductPatchService(
+            aggregate_service=self._aggregate_service,
+            refresh_service=FakeRefreshService(
+                snapshot_repository=self._snapshot_repository,
+                aggregate_repository=self._aggregate_repository,
+                refreshed_snapshot=self._base_snapshot,
+            ),
+            snapshot_repository=self._snapshot_repository,
+            patch_repository=self._patch_repository,
+            task_repository=self._task_repository,
+            session_factory=NonOkSaveSession,
+        )
+
+        with self.assertRaisesRegex(RuntimeError, "FOKS save was rejected"):
+            save_service.save(
+                patch_id=persisted_patch.patch_id,
+                base_url="https://my.foks.biz",
+                username="user",
+                password="pass",
+            )
+
+        failed_patch = self._patch_repository.get_patch_by_id(persisted_patch.patch_id)
+        assert failed_patch is not None
+        self.assertEqual(failed_patch.status, "failed")
+        self.assertEqual(failed_patch.save_result["response"]["ok"], False)
+
+    def test_save_service_accepts_html_foks_response_and_verifies_refresh(self) -> None:
+        """A non-JSON FOKS save response should not crash when refresh verification confirms the change."""
+        preview_service = PreviewProductPatchService(
+            aggregate_service=self._aggregate_service,
+            patch_repository=self._patch_repository,
+            task_repository=self._task_repository,
+            patch_generator=None,
+        )
+        persisted_patch = preview_service.preview(
+            article="ART-777",
+            raw_draft={
+                "product_id": "prod-1",
+                "offer_id": "offer-1",
+                "marketplace_patches": [
+                    {
+                        "market_id": "prom",
+                        "fields": {"nameExt": "Saved title"},
+                    }
+                ],
+            },
+        )
+        refreshed_snapshot = ApplyProductPatchService().apply(
+            snapshot=self._base_snapshot,
+            patch=persisted_patch.patch,
+        )
+        save_service = SaveProductPatchService(
+            aggregate_service=self._aggregate_service,
+            refresh_service=FakeRefreshService(
+                snapshot_repository=self._snapshot_repository,
+                aggregate_repository=self._aggregate_repository,
+                refreshed_snapshot=refreshed_snapshot,
+            ),
+            snapshot_repository=self._snapshot_repository,
+            patch_repository=self._patch_repository,
+            task_repository=self._task_repository,
+            session_factory=HtmlSaveSession,
+        )
+
+        saved_patch = save_service.save(
+            patch_id=persisted_patch.patch_id,
+            base_url="https://my.foks.biz",
+            username="user",
+            password="pass",
+        )
+
+        self.assertEqual(saved_patch.status, "saved")
+        self.assertEqual(saved_patch.save_result["verification"]["status"], "ok")
+        self.assertIn("<!DOCTYPE html>", saved_patch.save_result["response"])
 
     def test_save_service_marks_verification_mismatch_as_retryable(self) -> None:
         """A post-save verification mismatch should remain retryable instead of becoming terminal."""
