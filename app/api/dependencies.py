@@ -5,7 +5,7 @@ from functools import lru_cache
 from app.infrastructure.db import PatchRepository, ProductAggregateRepository, ProductRepository, SnapshotRepository, TaskRepository
 from app.application.services.product_aggregate import GetProductAggregateService, RefreshProductAggregateService
 from app.application.services.product_ai import ProductAIContextBuilderService
-from app.application.services.product_payload import BuildSavePayloadService
+from app.application.services.product_payload import PrepareSavePayloadService
 from app.application.services.product_patch_validation import ProductPatchValidationService
 from app.application.services.product_preview import PreviewProductPatchService
 from app.application.services.product_save import ApplyProductPatchService, SaveProductPatchService
@@ -14,11 +14,27 @@ from app.infrastructure.settings import Settings, get_settings
 
 
 @lru_cache(maxsize=1)
-def get_payload_service() -> BuildSavePayloadService:
-    """Return a cached payload builder service instance for API handlers."""
-    return BuildSavePayloadService(
-        snapshot_repository=SnapshotRepository(),
+def get_patch_repository() -> PatchRepository:
+    """Return the repository used for persisted patch reads."""
+    return PatchRepository()
+
+
+@lru_cache(maxsize=1)
+def get_payload_service() -> PrepareSavePayloadService:
+    """Return a cached final save-payload preparation service for API handlers."""
+    product_repository = ProductRepository()
+    snapshot_repository = SnapshotRepository(product_repository=product_repository)
+    aggregate_repository = ProductAggregateRepository(
+        product_repository=product_repository,
+        snapshot_repository=snapshot_repository,
+    )
+    aggregate_service = GetProductAggregateService(aggregate_repository=aggregate_repository)
+    return PrepareSavePayloadService(
+        aggregate_service=aggregate_service,
+        snapshot_repository=snapshot_repository,
+        patch_repository=PatchRepository(),
         task_repository=TaskRepository(),
+        apply_patch_service=ApplyProductPatchService(),
     )
 
 

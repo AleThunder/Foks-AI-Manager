@@ -32,6 +32,7 @@ class FoksSession:
         self._is_authenticated = False
         self._auth_logger = get_logger("app.integration.foks.auth")
         self._read_logger = get_logger("app.integration.foks.read")
+        self._http_logger = get_logger("app.integration.foks.http")
 
     def _url(self, path: str) -> str:
         """Convert a relative FOKS path into an absolute URL."""
@@ -89,7 +90,10 @@ class FoksSession:
         if require_auth:
             self.ensure_authenticated()
 
+        url = self._url(path)
+        self._log_http_request(method=method, path=path, url=url, kwargs=kwargs)
         response = self.session.request(method, self._url(path), **kwargs)
+        self._log_http_response(method=method, path=path, url=url, response=response)
 
         if require_auth and allow_retry and self._is_auth_failure_response(response):
             self._auth_logger.warning(
@@ -108,6 +112,66 @@ class FoksSession:
 
         response.raise_for_status()
         return response
+
+    def _log_http_request(self, *, method: str, path: str, url: str, kwargs: dict[str, Any]) -> None:
+        """Record outgoing FOKS request details, including request bodies when present."""
+        request_params = self._redact_sensitive(kwargs.get("params") or {})
+        self._http_logger.info(
+            "foks_http_request",
+            extra={
+                "event": "foks_http_request",
+                "method": method.upper(),
+                "path": path,
+                "url": url,
+                "request_params": request_params,
+                "request_headers": self._redact_sensitive(kwargs.get("headers") or {}),
+                "request_json": kwargs.get("json"),
+                "request_data": kwargs.get("data"),
+            },
+        )
+
+    def _log_http_response(self, *, method: str, path: str, url: str, response: Response) -> None:
+        """Record incoming FOKS response details, including bodies when present."""
+        response_body = ""
+        try:
+            response_body = response.text
+        except Exception:
+            response_body = "<unavailable>"
+
+        response_json: Any | None = None
+        content_type = response.headers.get("Content-Type", "")
+        if "application/json" in content_type:
+            try:
+                response_json = response.json()
+            except ValueError:
+                response_json = None
+
+        self._http_logger.info(
+            "foks_http_response",
+            extra={
+                "event": "foks_http_response",
+                "method": method.upper(),
+                "path": path,
+                "url": url,
+                "status_code": response.status_code,
+                "response_url": response.url,
+                "response_headers": dict(response.headers),
+                "response_body": response_body,
+                "response_json": response_json,
+            },
+        )
+
+    def _redact_sensitive(self, payload: Any) -> Any:
+        """Redact credentials while keeping the rest of the FOKS request inspectable."""
+        if not isinstance(payload, dict):
+            return payload
+        redacted: dict[str, Any] = {}
+        for key, value in payload.items():
+            if str(key).lower() in {"password", "pass"}:
+                redacted[key] = "***"
+                continue
+            redacted[key] = value
+        return redacted
 
     def ensure_authenticated(self) -> None:
         """Log in lazily before the first protected request."""

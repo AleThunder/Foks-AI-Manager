@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 import unittest
 from unittest.mock import Mock, patch
 
@@ -103,6 +104,53 @@ class FoksSessionTests(unittest.TestCase):
         self.assertEqual(headers["X-CSRF-TOKEN"], "csrf-token")
         self.assertEqual(headers["Referer"], "https://my.foks.biz/c/products/productModal")
         self.assertEqual(headers["Origin"], "https://my.foks.biz")
+
+    def test_post_json_logs_foks_request_and_response_bodies(self) -> None:
+        """Every FOKS request should emit structured request and response body logs."""
+        mock_http = Mock()
+        json_response = make_response(
+            headers={"Content-Type": "application/json"},
+            text='{"ok": true}',
+            url="https://my.foks.biz/c/products/save",
+        )
+        json_response.json.return_value = {"ok": True}
+        mock_http.request.side_effect = [
+            make_response(
+                text='<html><input name="_csrf" value="homepage-token"></html>',
+                url="https://my.foks.biz/",
+            ),
+            make_response(
+                status_code=302,
+                headers={"Location": "/c/products"},
+                url="https://my.foks.biz/login",
+            ),
+            json_response,
+        ]
+        mock_http.cookies = Mock()
+
+        with (
+            patch("app.infrastructure.foks.session.requests.Session", return_value=mock_http),
+            self.assertLogs("app.integration.foks.http", level="INFO") as captured_logs,
+        ):
+            session = FoksSession("https://my.foks.biz", "user", "pass")
+            payload = session.post_json("/c/products/save", {"id": "prod-1"}, "csrf-token")
+
+        self.assertEqual(payload, {"ok": True})
+        request_records = [
+            record
+            for record in captured_logs.records
+            if getattr(record, "event", "") == "foks_http_request"
+            and getattr(record, "path", "") == "/c/products/save"
+        ]
+        response_records = [
+            record
+            for record in captured_logs.records
+            if getattr(record, "event", "") == "foks_http_response"
+            and getattr(record, "path", "") == "/c/products/save"
+        ]
+        self.assertEqual(request_records[0].request_json, {"id": "prod-1"})
+        self.assertEqual(response_records[0].response_body, '{"ok": true}')
+        self.assertEqual(response_records[0].response_json, {"ok": True})
 
 
 if __name__ == "__main__":

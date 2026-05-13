@@ -3,7 +3,7 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Any
 
-from pydantic import BaseModel, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from app.domain.models import (
     FeatureValue,
@@ -20,18 +20,17 @@ from app.domain.models import (
 )
 
 
-class BuildPayloadRequest(BaseModel):
-    """Describe the input payload for building a FOKS save request."""
-    article: str = Field(min_length=1)
-    mids: list[str] | None = None
+class PrepareSavePayloadRequest(BaseModel):
+    """Describe the input payload for preparing a final FOKS save request."""
+    model_config = ConfigDict(extra="forbid")
+
+    patch_id: int = Field(gt=0)
+    approved_by: str = ""
     base_url: str | None = None
-    username: str | None = None
-    password: str | None = None
-    payload_only: bool = False
 
 
-class BuildPayloadResponse(BaseModel):
-    """Wrap the generated save request or raw payload returned by the API."""
+class PrepareSavePayloadResponse(BaseModel):
+    """Wrap the prepared save request and updated patch lifecycle state."""
     data: dict[str, Any]
 
 
@@ -396,3 +395,14 @@ class PersistedProductPatchResponse(BaseModel):
 class PersistedProductPatchEnvelope(BaseModel):
     """Wrap one persisted patch/draft response returned by preview APIs."""
     data: PersistedProductPatchResponse
+
+
+class ProductPatchChangesResponse(BaseModel):
+    """Expose compact old/new values for one persisted patch diff."""
+    patch_id: int
+    changes: dict[str, list[Any]] = Field(default_factory=dict)
+
+
+class ProductPatchChangesEnvelope(BaseModel):
+    """Wrap compact patch changes returned by the public API."""
+    data: ProductPatchChangesResponse

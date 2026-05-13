@@ -208,6 +208,52 @@ class ProductPreviewTests(unittest.TestCase):
         self.assertTrue(any("product_id" in error for error in persisted_patch.validation_errors))
         self.assertTrue(any("offer_id" in error for error in persisted_patch.validation_errors))
 
+    def test_ai_preview_generates_only_marketplace_text_fields(self) -> None:
+        """AI-generated drafts for the first release should only patch marketplace text fields."""
+        service = PreviewProductPatchService(
+            aggregate_service=self._aggregate_service,
+            patch_repository=self._patch_repository,
+            task_repository=self._task_repository,
+            patch_generator=FakePatchGenerator(
+                {
+                    "product_id": "prod-1",
+                    "offer_id": "offer-1",
+                    "marketplace_patches": [
+                        {
+                            "market_id": "prom",
+                            "fields": {
+                                "nameExt": "Prom generated",
+                                "descriptionExtRu": "<p>Prom generated description</p>",
+                                "nameExtUa": "Prom generated ua",
+                                "descriptionExtUa": "<p>Prom generated ua description</p>",
+                            },
+                            "feature_values": [],
+                        },
+                        {
+                            "market_id": "rozetka",
+                            "fields": {
+                                "nameExt": "Rozetka generated",
+                                "descriptionExtRu": "<p>Rozetka generated description</p>",
+                                "nameExtUa": "Rozetka generated ua",
+                                "descriptionExtUa": "<p>Rozetka generated ua description</p>",
+                            },
+                            "feature_values": [],
+                        },
+                    ],
+                }
+            ),
+        )
+
+        persisted_patch = service.preview(article="ART-777", instructions="Generate text only.")
+
+        self.assertEqual(persisted_patch.status, "draft")
+        self.assertEqual(
+            set(persisted_patch.patch.marketplace_patches["prom"].fields.keys()),
+            {"nameExt", "descriptionExtRu", "nameExtUa", "descriptionExtUa"},
+        )
+        self.assertEqual(persisted_patch.patch.marketplace_patches["prom"].feature_values, {})
+        self.assertEqual(persisted_patch.patch.marketplace_patches["rozetka"].feature_values, {})
+
 
 if __name__ == "__main__":
     unittest.main()

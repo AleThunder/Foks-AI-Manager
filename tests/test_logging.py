@@ -51,18 +51,26 @@ class LoggingTests(unittest.TestCase):
                         "integration_message",
                         extra={"event": "integration_message"},
                     )
+                    get_logger("app.integration.openai").info(
+                        "openai_message",
+                        extra={"event": "openai_message"},
+                    )
                 finally:
                     reset_log_context(tokens)
 
                 app_log = Path(temp_dir) / "app.log"
-                integration_log = Path(temp_dir) / "foks-integration.log"
+                foks_integration_log = Path(temp_dir) / "foks-integration.log"
+                openai_api_log = Path(temp_dir) / "openai-api.log"
 
                 self.assertTrue(app_log.exists())
-                self.assertTrue(integration_log.exists())
+                self.assertTrue(foks_integration_log.exists())
+                self.assertTrue(openai_api_log.exists())
                 self.assertIn("app_message", app_log.read_text(encoding="utf-8"))
                 self.assertIn("integration_message", app_log.read_text(encoding="utf-8"))
-                self.assertIn("integration_message", integration_log.read_text(encoding="utf-8"))
-                self.assertNotIn("app_message", integration_log.read_text(encoding="utf-8"))
+                self.assertIn("integration_message", foks_integration_log.read_text(encoding="utf-8"))
+                self.assertNotIn("app_message", foks_integration_log.read_text(encoding="utf-8"))
+                self.assertIn("openai_message", openai_api_log.read_text(encoding="utf-8"))
+                self.assertNotIn("integration_message", openai_api_log.read_text(encoding="utf-8"))
             finally:
                 logging.shutdown()
                 configure_logging(force=True, log_dir="logs")

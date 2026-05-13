@@ -111,20 +111,15 @@ def configure_logging(
 
     _reset_application_loggers()
 
-    integration_logger = logging.getLogger("app.integration.foks")
-    _clear_logger_handlers(integration_logger)
-    integration_logger.handlers.clear()
-    integration_logger.setLevel(level)
-    integration_logger.propagate = True
-    integration_logger.addHandler(
-        _build_handler(
-            RotatingFileHandler(
-                log_path / "foks-integration.log",
-                maxBytes=MAX_LOG_FILE_SIZE,
-                backupCount=LOG_BACKUP_COUNT,
-                encoding="utf-8",
-            )
-        )
+    _configure_file_logger(
+        logger_name="app.integration.foks",
+        log_file=log_path / "foks-integration.log",
+        level=level,
+    )
+    _configure_file_logger(
+        logger_name="app.integration.openai",
+        log_file=log_path / "openai-api.log",
+        level=level,
     )
 
     configure_logging._configured = True
@@ -195,3 +190,22 @@ def _reset_application_loggers() -> None:
         logger.setLevel(logging.NOTSET)
         logger.disabled = False
         logger.propagate = True
+
+
+def _configure_file_logger(*, logger_name: str, log_file: Path, level: int) -> None:
+    """Attach a dedicated rotating file handler for one integration logger tree."""
+    logger = logging.getLogger(logger_name)
+    _clear_logger_handlers(logger)
+    logger.handlers.clear()
+    logger.setLevel(level)
+    logger.propagate = True
+    logger.addHandler(
+        _build_handler(
+            RotatingFileHandler(
+                log_file,
+                maxBytes=MAX_LOG_FILE_SIZE,
+                backupCount=LOG_BACKUP_COUNT,
+                encoding="utf-8",
+            )
+        )
+    )

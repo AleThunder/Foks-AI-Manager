@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import re
+from html import unescape
 from typing import Any
 
 from bs4 import BeautifulSoup
@@ -40,7 +41,7 @@ class ModalParser:
 
             value: Any
             if el.name == "textarea":
-                value = el.text or ""
+                value = unescape(el.decode_contents() or "")
             elif el.name == "select":
                 selected = el.find("option", selected=True)
                 value = selected.get("value", "") if selected else ""
